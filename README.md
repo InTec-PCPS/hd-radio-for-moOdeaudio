@@ -12,3 +12,5 @@ Adding stations to moOdeaudio uses a URI that tunes the frequency and multicast 
 It may take a couple clicks in moOdeaudio to tune a station. moOde tends to error out on the first click because the stream hasn't had a chance to start yet.
 
 It also takes a few seconds to buffer and settle down, but it does work.
+
+Note to self: remember to enable and start services...and to set icecast passwords where needed. Python needs flask. Icecast needs to be installed. nrsc5 needs to be compiled.
