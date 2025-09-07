@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# permissions: 755 root root
+
+set -euo pipefail
+BASE="$1"; MOUNT="$2"; USER="$3"; PASS="$4"; LABEL="${5:-}"
+
+last=""; title=""; artist=""
+last_ts=0
+
+sanitize() {
+  sed 's/[[:cntrl:]]//g;s/  \+/\ /g' | awk '{print substr($0,1,120)}'
+}
+
+push_title() {
+  local now="$1"
+  local ts; ts=$(date +%s)
+  [[ "$now" == "$last" ]] && return 0
+  [[ $((ts - last_ts)) -lt 2 ]] && return 0
+
+  # breadcrumbs
+  echo "$(date '+%F %T') PUSH: ${now}" >> /var/log/hd-meta.log
+  logger -t hd-meta "update: ${now}"
+
+  curl -sS --user "${USER}:${PASS}" \
+    --get "${BASE}/admin/metadata" \
+    --data-urlencode "mode=updinfo" \
+    --data-urlencode "mount=${MOUNT}" \
+    --data-urlencode "charset=UTF-8" \
+    --data-urlencode "song=${now}" >/dev/null || true
+
+  last="$now"
+  last_ts="$ts"
+}
+
+emit_if_ready() {
+  local a t now
+  a="$(printf '%s' "${artist:-}" | sanitize)"
+  t="$(printf '%s' "${title:-}"  | sanitize)"
+  if [[ -n "$a" && -n "$t" ]]; then
+    if [[ -n "$LABEL" ]]; then
+      now="${LABEL}: ${a} - ${t}"
+    else
+      now="${a} - ${t}"
+    fi
+    push_title "$now"
+    unset artist title
+  fi
+}
+
+while IFS= read -r line; do
+  if [[ "$line" =~ Now\ playing:\ ([^-]+)\ -\ (.*)$ ]]; then
+    artist="${BASH_REMATCH[1]}"; title="${BASH_REMATCH[2]}"
+    echo "$(date '+%F %T') MATCH: artist='${artist}' title='${title}'" >> /var/log/hd-meta.log
+    emit_if_ready
+    continue
+  fi
+
+  if [[ "$line" =~ Artist:\ (.*)$ ]]; then
+    artist="${BASH_REMATCH[1]}"; echo "$(date '+%F %T') MATCH: artist='${artist}'" >> /var/log/hd-meta.log
+  fi
+  if [[ "$line" =~ Title:\ (.*)$ ]]; then
+    title="${BASH_REMATCH[1]}";  echo "$(date '+%F %T') MATCH: title='${title}'"  >> /var/log/hd-meta.log
+  fi
+
+  if [[ -z "${artist:-}" && "$line" =~ Station\ name:\ (.*)$ ]]; then
+    artist="${BASH_REMATCH[1]}"; echo "$(date '+%F %T') MATCH: artist(station)='${artist}'" >> /var/log/hd-meta.log
+  fi
+  if [[ -z "${title:-}"  && "$line" =~ Slogan:\ (.*)$ ]]; then
+    title="${BASH_REMATCH[1]}";  echo "$(date '+%F %T') MATCH: title(slogan)='${title}'"  >> /var/log/hd-meta.log
+  fi
+
+  emit_if_ready
+done
